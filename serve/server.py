@@ -2,6 +2,7 @@ import html
 import http.server
 import io
 import ssl
+from datetime import datetime
 from secrets import token_urlsafe
 import os
 from urllib.parse import urlparse, quote
@@ -168,7 +169,12 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header('Content-Length', str(length))
                 self.send_header('Accept-Ranges', 'bytes')
                 self.end_headers()
-                self.wfile.write(f.read(length))
+                try:
+                    self.wfile.write(f.read(length))
+                except ssl.SSLEOFError:
+                    # Log the occurrence of SSL EOF errors if needed, or pass to ignore
+                    print(f"Info: SSL connection was closed prematurely by the client at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}.")
+
             else:
                 self.send_response(200)
                 self.send_header('Content-Length', str(fs.st_size))
