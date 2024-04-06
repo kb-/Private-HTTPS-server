@@ -10,7 +10,8 @@ from datetime import datetime
 from http.server import HTTPServer
 from secrets import token_urlsafe
 from socketserver import ThreadingMixIn
-from typing import Optional, Union
+from types import FrameType
+from typing import Any, Optional, Type, Union
 from urllib.parse import quote, unquote, urlparse
 
 from icecream import ic
@@ -38,7 +39,15 @@ token = token_urlsafe(48)
 class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Custom HTTP request handler with token-based path translation and listing directory contents."""
 
-    def __init__(self, *args, file_transfer_log=None, **kwargs):
+    def __init__(self, *args, file_transfer_log: FileTransferLog, **kwargs):
+        """
+        Initialize the request handler instance with a reference to a FileTransferLog.
+
+        Args:
+            *args: Variable length argument list passed to the superclass initializer.
+            file_transfer_log (Optional[FileTransferLog]): An instance of FileTransferLog to log file transfers.
+            **kwargs: Arbitrary keyword arguments passed to the superclass initializer.
+        """
         self.file_transfer_log = file_transfer_log
         super().__init__(*args, **kwargs)
 
@@ -46,11 +55,14 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         """
         Translate a request path to a filesystem path.
 
+        This method overrides the SimpleHTTPRequestHandler's translate_path method to
+        implement token-based access control and path translation.
+
         Args:
             path (str): The path from the HTTP request.
 
         Returns:
-            str: The corresponding filesystem path based on the request.
+            str: The filesystem path corresponding to the request path.
         """
         parsed_path = urlparse(path)
         path_parts = parsed_path.path.strip("/").split("/", 1)
@@ -83,17 +95,16 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             # Invalid or missing token; return an empty string to signal unauthorized access
             return ""
 
-    def list_directory(
-        self, path: Union[str, os.PathLike[str]]
-    ) -> Optional[io.BytesIO]:
+    def list_directory(self, path: Union[str, os.PathLike]) -> None:
         """
-        Generate a directory listing in HTML format.
+        Generate and send a directory listing in HTML format to the client.
+
+        This method overrides the SimpleHTTPRequestHandler's list_directory method to
+        customize the appearance of directory listings. It directly writes the HTML
+        listing to the HTTP response.
 
         Args:
-            path (str): The filesystem path to list contents for.
-
-        Returns:
-            Optional[io.BytesIO]: A BytesIO stream containing the HTML listing, or None if an error occurred.
+            path (Union[str, os.PathLike]): The filesystem path to list contents for.
         """
         try:
             listing = os.listdir(path)
@@ -180,7 +191,9 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         """
         Handle a GET request.
 
-        Serve a file or directory listing to the client, applying range requests if specified.
+        This method is called to handle each GET request received by the server. It handles
+        serving files, directory listings, and implements range requests if specified.
+
         """
         self.range = None
         path = self.translate_path(self.path)
@@ -288,10 +301,13 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         self, code: int, message: Optional[str] = None, explain: Optional[str] = None
     ) -> None:
         """
-        Send an error response to the client.
+        Send an HTTP error response to the client.
+
+        This method overrides the SimpleHTTPRequestHandler's send_error method to customize
+        error handling, such as redirecting on 404 errors.
 
         Args:
-            code (int): The HTTP error code to send.
+            code (int): The HTTP status code to send.
             message (Optional[str]): An optional human-readable message describing the error.
             explain (Optional[str]): An optional detailed explanation of the error.
         """
@@ -302,8 +318,13 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         else:
             super().send_error(code, message=message, explain=explain)
 
-    def end_headers(self):
-        """Override end_headers to set Content-Disposition for specific file types."""
+    def end_headers(self) -> None:
+        """
+        Send the headers to the client.
+
+        This method is called by end_headers of SimpleHTTPRequestHandler to finalize sending
+        the headers, with modifications to handle content disposition for file downloads.
+        """
         # Extract the file extension from the requested path
         _, ext = os.path.splitext(self.path)
         # Check if the file extension is in our list of extensions to download
@@ -317,46 +338,27 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
 
-class CustomHTTPServer(HTTPServer):
-    def __init__(
-        self,
-        server_address,
-        RequestHandlerClass,
-        bind_and_activate=True,
-        file_transfer_log=None,
-    ):
-        self.file_transfer_log = file_transfer_log
-        super().__init__(
-            server_address, RequestHandlerClass, bind_and_activate=bind_and_activate
-        )
-
-    def finish_request(self, request, client_address):
-        self.RequestHandlerClass(
-            request, client_address, self, file_transfer_log=self.file_transfer_log
-        )
-
-
 # Create a threaded version of HTTPServer
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     """Handle requests in a separate thread."""
 
 
 def run(
-    handler_class=TokenRangeHTTPRequestHandler,
+    handler_class: Type[TokenRangeHTTPRequestHandler] = TokenRangeHTTPRequestHandler,
     port: int = PORT,
 ) -> None:
     """
-    Start an HTTPS server on a specified port with a given request handler class.
+    Starts an HTTPS server on a specified port with a given request handler class.
 
     This function configures and starts an HTTPS server running on the specified port,
     using the provided request handler class to handle incoming HTTPS requests. It
-    uses SSLContext to secure the server.
+    utilizes SSLContext to secure the server.
 
     Args:
         handler_class: The request handler class that defines how to handle incoming HTTP requests.
-            This class should be a subclass of http.server.BaseHTTPRequestHandler and override its methods to handle requests.
-        port (int, optional): The port number on which the server should listen.
-
+                       This class should be a subclass of http.server.BaseHTTPRequestHandler
+                       and override its methods to handle requests.
+        port (int, optional): The port number on which the server should listen. Defaults to PORT.
     """
     server_address = ("", port)
 
@@ -388,7 +390,19 @@ def run(
 shutdown_in_progress = False
 
 
-def signal_handler(sig, frame):
+def signal_handler(sig: int, frame: Optional[FrameType]) -> Any:
+    """
+    Handles incoming signals to initiate a graceful shutdown of the server.
+
+    This function is designed to respond to SIGINT and SIGTERM signals by initiating
+    a shutdown process for the server. It ensures that the file transfer log's
+    connection is properly closed and any necessary cleanup is performed before
+    terminating the process.
+
+    Args:
+        sig (int): The signal number.
+        frame (FrameType): The current stack frame.
+    """
     global shutdown_in_progress
     if not shutdown_in_progress:
         shutdown_in_progress = True
