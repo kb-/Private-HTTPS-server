@@ -5,6 +5,7 @@ import ssl
 from datetime import datetime
 from secrets import token_urlsafe
 import os
+from typing import Optional
 from urllib.parse import urlparse, quote, unquote
 from icecream import ic
 
@@ -13,7 +14,18 @@ token = token_urlsafe(48)  # Shorter token for readability; adjust length as nee
 
 
 class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    def translate_path(self, path):
+    """Custom HTTP request handler with token-based path translation and listing directory contents."""
+
+    def translate_path(self, path: str) -> str:
+        """
+        Translate a request path to a filesystem path.
+
+        Args:
+            path (str): The path from the HTTP request.
+
+        Returns:
+            str: The corresponding filesystem path based on the request.
+        """
         parsed_path = urlparse(path)
         path_parts = parsed_path.path.strip("/").split("/", 1)
 
@@ -42,7 +54,16 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             # Invalid or missing token; return an empty string to signal unauthorized access
             return ""
 
-    def list_directory(self, path):
+    def list_directory(self, path: str) -> Optional[io.BytesIO]:
+        """
+        Generate a directory listing in HTML format.
+
+        Args:
+            path (str): The filesystem path to list contents for.
+
+        Returns:
+            Optional[io.BytesIO]: A BytesIO stream containing the HTML listing, or None if an error occurred.
+        """
         try:
             listing = os.listdir(path)
         except os.error:
@@ -119,8 +140,12 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             finally:
                 f.close()
 
-    def do_GET(self):
-        """Serve a GET request with support for range requests."""
+    def do_GET(self) -> None:
+        """
+        Handle a GET request.
+
+        Serve a file or directory listing to the client, applying range requests if specified.
+        """
         self.range = None
         range_header = self.headers.get('Range')
         if range_header:
@@ -191,8 +216,15 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         finally:
             f.close()
 
-    def send_error(self, code, message=None, explain=None):
-        """Send error response. Redirect to root if the error is 404."""
+    def send_error(self, code: int, message: Optional[str] = None, explain: Optional[str] = None) -> None:
+        """
+        Send an error response to the client.
+
+        Args:
+            code (int): The HTTP error code to send.
+            message (Optional[str]): An optional human-readable message describing the error.
+            explain (Optional[str]): An optional detailed explanation of the error.
+        """
         if code == 404:
             self.send_response(302)  # 302 Found - Temporary redirect
             self.send_header('Location', 'https://myworldspots.com')
@@ -200,7 +232,30 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         else:
             super().send_error(code, message=message, explain=explain)
 
-def run(server_class=http.server.HTTPServer, handler_class=TokenRangeHTTPRequestHandler, port=8000):
+
+def run(server_class=http.server.HTTPServer,
+        handler_class=TokenRangeHTTPRequestHandler,
+        port: int = 8000) -> None:
+    """
+    Start an HTTP server on a specified port with a given request handler class.
+
+    This function configures and starts an HTTP server running on the specified port,
+    using the provided request handler class to handle incoming HTTP requests. It's
+    designed to be flexible, allowing for different server classes and request handlers,
+    which makes it suitable for various types of HTTP servers - from simple file servers
+    to more complex application-specific servers.
+
+    Args:
+        server_class (http.server.HTTPServer): The class to use for creating the HTTP server.
+            This allows for customization of the server's behavior.
+        handler_class (http.server.BaseHTTPRequestHandler): The request handler class that defines
+            how to handle incoming HTTP requests. This class should be a subclass of
+            http.server.BaseHTTPRequestHandler and override its methods to handle requests.
+        port (int, optional): The port number on which the server should listen. Defaults to 8000.
+
+    Returns:
+        None
+    """
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
 
@@ -212,6 +267,7 @@ def run(server_class=http.server.HTTPServer, handler_class=TokenRangeHTTPRequest
     
     print(f"https://myworldspots.com:{port}/{token}/")
     httpd.serve_forever()
+
 
 if __name__ == '__main__':
     ic()
