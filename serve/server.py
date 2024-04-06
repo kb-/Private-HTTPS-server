@@ -9,6 +9,7 @@ import sys
 from datetime import datetime
 from http.server import HTTPServer
 from secrets import token_urlsafe
+from socketserver import ThreadingMixIn
 from typing import Optional, Union
 from urllib.parse import quote, unquote, urlparse
 
@@ -335,6 +336,11 @@ class CustomHTTPServer(HTTPServer):
         )
 
 
+# Create a threaded version of HTTPServer
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Handle requests in a separate thread."""
+
+
 def run(
     handler_class=TokenRangeHTTPRequestHandler,
     port: int = PORT,
@@ -354,20 +360,29 @@ def run(
     """
     server_address = ("", port)
 
-    # Initialize the custom server with the file_transfer_log
-    httpd = CustomHTTPServer(
-        server_address, handler_class, file_transfer_log=file_transfer_log
+    # Now using the threaded server with the file transfer log
+    httpd = ThreadedHTTPServer(
+        server_address,
+        lambda *args, **kwargs: handler_class(
+            *args, file_transfer_log=file_transfer_log, **kwargs
+        ),
     )
 
     # Setup SSL context
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(certfile=CERTFILE, keyfile=KEYFILE)
 
-    # Apply SSL to the server's socket
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
     print(f"{URL}:{port}/{token}/")
-    httpd.serve_forever()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+        file_transfer_log.close_connection()
+        print("Server stopped.")
 
 
 shutdown_in_progress = False
