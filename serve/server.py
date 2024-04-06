@@ -178,6 +178,15 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         finally:
             f.close()
 
+    def send_error(self, code, message=None, explain=None):
+        """Send error response. Redirect to root if the error is 404."""
+        if code == 404:
+            self.send_response(302)  # 302 Found - Temporary redirect
+            self.send_header('Location', 'https://myworldspots.com')
+            self.end_headers()
+        else:
+            super().send_error(code, message=message, explain=explain)
+
 def run(server_class=http.server.HTTPServer, handler_class=TokenRangeHTTPRequestHandler, port=8000):
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
