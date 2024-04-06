@@ -5,7 +5,7 @@ import ssl
 from datetime import datetime
 from secrets import token_urlsafe
 import os
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse, quote, unquote
 from icecream import ic
 
 # Generate a secure token
@@ -19,8 +19,12 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         if len(path_parts) >= 1 and path_parts[0] == token:
             if len(path_parts) == 2:
+                # Decode percent-encoded characters
+                decoded_path = unquote(path_parts[1])
+                # ic(decoded_path)
+
                 # Split the second part of the path to check for 'resources'
-                resource_parts = path_parts[1].split("/", 1)
+                resource_parts = decoded_path.split("/", 1)
 
                 if resource_parts[0] == 'resources':
                     # Accessing the 'resources' directory
@@ -30,7 +34,7 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 else:
                     # Accessing the 'public_html' directory
                     new_path = '/' + path_parts[1]
-                    return os.path.join(os.getcwd(), 'public_html', new_path.strip('/'))
+                    return os.path.join(os.getcwd(), 'public_html', decoded_path.strip('/'))
             else:
                 # No specific file/directory requested; default to the root of 'public_html'
                 return os.path.join(os.getcwd(), 'public_html', '')
@@ -124,9 +128,9 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_error(400, 'Invalid range request')
                 return
         
-        ic(self.path)
+        # ic(self.path)
         path = self.translate_path(self.path)
-        ic(path)
+        # ic(path)
         if path == "":
             self.send_error(404, "File not found")
             return
@@ -137,10 +141,10 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 path = os.path.join(path, "index.html")
                 self.send_header('Content-Type', 'text/html')
             else:
-                ic()
+                # ic()
                 # This should automatically set the content type
                 dir_content = self.list_directory(path)
-                ic(dir_content)
+                # ic(dir_content)
                 return dir_content
         else:
             # When serving files, especially HTML, ensure the content type is set if not automatically handled
@@ -149,7 +153,8 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
             try:
                 f = open(path, 'rb')
-            except OSError:
+            except OSError as e:
+                ic(e)
                 self.send_error(404, "File not found")
                 return
 
