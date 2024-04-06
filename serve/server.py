@@ -169,11 +169,7 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header('Content-Length', str(length))
                 self.send_header('Accept-Ranges', 'bytes')
                 self.end_headers()
-                try:
-                    self.wfile.write(f.read(length))
-                except ssl.SSLEOFError:
-                    # Log the occurrence of SSL EOF errors if needed, or pass to ignore
-                    print(f"Info: SSL connection was closed prematurely by the client at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}.")
+                self.wfile.write(f.read(length))
 
             else:
                 self.send_response(200)
@@ -181,6 +177,9 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header('Accept-Ranges', 'bytes')
                 self.end_headers()
                 self.copyfile(f, self.wfile)
+        except ssl.SSLEOFError:
+            print(
+                f"SSL connection closed prematurely by the client at {datetime.now()}.")
         finally:
             f.close()
 
