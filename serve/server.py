@@ -1,21 +1,45 @@
 import html
-import http.server
+import http
 import io
+import json
 import os
+import signal
 import ssl
+import sys
 from datetime import datetime
+from http.server import HTTPServer
 from secrets import token_urlsafe
 from typing import Optional, Union
 from urllib.parse import quote, unquote, urlparse
 
 from icecream import ic
 
+from serve.logger import FileTransferLog
+
+# Load config
+with open("../config.json", "r") as f:
+    config = json.load(f)
+
+# Initialize your FileTransferLog instance
+file_transfer_log = FileTransferLog("database.db")
+
+# Access config values
+URL = config["url"]
+PORT = config["port"]
+CERTFILE = config["certfile"]
+KEYFILE = config["keyfile"]
+DOWNLOAD_EXTENSIONS = config["download_extensions"]
+
 # Generate a secure token
-token = token_urlsafe(48)  # Shorter token for readability; adjust length as needed
+token = token_urlsafe(48)
 
 
 class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Custom HTTP request handler with token-based path translation and listing directory contents."""
+
+    def __init__(self, *args, file_transfer_log=None, **kwargs):
+        self.file_transfer_log = file_transfer_log
+        super().__init__(*args, **kwargs)
 
     def translate_path(self, path: str) -> str:
         """
@@ -158,7 +182,10 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         Serve a file or directory listing to the client, applying range requests if specified.
         """
         self.range = None
+        path = self.translate_path(self.path)
+        client_ip = self.client_address[0]  # Client's IP address
         range_header = self.headers.get("Range")
+
         if range_header:
             try:
                 self.range = range_header.split("=")[1].split("-")
@@ -166,12 +193,17 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     int(self.range[0]),
                     int(self.range[1]) if self.range[1] else None,
                 )
+                self.file_transfer_log.log_transfer(
+                    path=self.path,
+                    status="range-start",
+                    start_byte=self.range[0],
+                    end_byte=self.range[1] if self.range[1] else None,
+                    client_ip=client_ip,
+                )
             except ValueError:
                 self.send_error(400, "Invalid range request")
                 return
 
-        # ic(self.path)
-        path = self.translate_path(self.path)
         # ic(path)
         if path == "":
             self.send_error(404, "File not found")
@@ -191,6 +223,12 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             # When serving files, especially HTML, ensure the content type is set if not automatically handled
             if path.endswith(".html"):
                 self.send_header("Content-Type", "text/html")
+
+            # Log the start of a full file transfer here
+            if not self.range:
+                self.file_transfer_log.log_transfer(
+                    path=path, status="start", client_ip=client_ip
+                )
 
             try:
                 f = open(path, "rb")
@@ -216,16 +254,31 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header("Accept-Ranges", "bytes")
                 self.end_headers()
                 self.wfile.write(f.read(length))
-
+                # Log the end of a range transfer here
+                self.file_transfer_log.log_transfer(
+                    path=path,
+                    status="range-complete",
+                    start_byte=start,
+                    end_byte=end,
+                    client_ip=client_ip,
+                )
             else:
                 self.send_response(200)
                 self.send_header("Content-Length", str(fs.st_size))
                 self.send_header("Accept-Ranges", "bytes")
                 self.end_headers()
                 self.copyfile(f, self.wfile)  # type: ignore[misc]
+                # Log the end of a full file transfer here
+                self.file_transfer_log.log_transfer(
+                    path=path, status="complete", client_ip=client_ip
+                )
         except ssl.SSLEOFError:
             print(
                 f"SSL connection closed prematurely by the client at {datetime.now()}."
+            )
+            # Log the premature closure here, if needed
+            self.file_transfer_log.log_transfer(
+                path=path, status="failed", client_ip=client_ip
             )
         finally:
             f.close()
@@ -243,52 +296,104 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         """
         if code == 404:
             self.send_response(302)  # 302 Found - Temporary redirect
-            self.send_header("Location", "https://myworldspots.com")
+            self.send_header("Location", URL)
             self.end_headers()
         else:
             super().send_error(code, message=message, explain=explain)
 
+    def end_headers(self):
+        """Override end_headers to set Content-Disposition for specific file types."""
+        # Extract the file extension from the requested path
+        _, ext = os.path.splitext(self.path)
+        # Check if the file extension is in our list of extensions to download
+        if ext in DOWNLOAD_EXTENSIONS:
+            # Set the Content-Disposition header to force a file download
+            filename = os.path.basename(self.path)
+            self.send_header(
+                "Content-Disposition", f'attachment; filename="{filename}"'
+            )
+        # Continue with the standard header ending process
+        super().end_headers()
+
+
+class CustomHTTPServer(HTTPServer):
+    def __init__(
+        self,
+        server_address,
+        RequestHandlerClass,
+        bind_and_activate=True,
+        file_transfer_log=None,
+    ):
+        self.file_transfer_log = file_transfer_log
+        super().__init__(
+            server_address, RequestHandlerClass, bind_and_activate=bind_and_activate
+        )
+
+    def finish_request(self, request, client_address):
+        self.RequestHandlerClass(
+            request, client_address, self, file_transfer_log=self.file_transfer_log
+        )
+
 
 def run(
-    server_class=http.server.HTTPServer,
     handler_class=TokenRangeHTTPRequestHandler,
-    port: int = 8000,
+    port: int = PORT,
 ) -> None:
     """
-    Start an HTTP server on a specified port with a given request handler class.
+    Start an HTTPS server on a specified port with a given request handler class.
 
-    This function configures and starts an HTTP server running on the specified port,
-    using the provided request handler class to handle incoming HTTP requests. It's
-    designed to be flexible, allowing for different server classes and request handlers,
-    which makes it suitable for various types of HTTP servers - from simple file servers
-    to more complex application-specific servers.
+    This function configures and starts an HTTPS server running on the specified port,
+    using the provided request handler class to handle incoming HTTPS requests. It
+    uses SSLContext to secure the server.
 
     Args:
-        server_class (http.server.HTTPServer): The class to use for creating the HTTP server.
-            This allows for customization of the server's behavior.
-        handler_class (http.server.BaseHTTPRequestHandler): The request handler class that defines
-            how to handle incoming HTTP requests. This class should be a subclass of
-            http.server.BaseHTTPRequestHandler and override its methods to handle requests.
-        port (int, optional): The port number on which the server should listen. Defaults to 8000.
+        handler_class: The request handler class that defines how to handle incoming HTTP requests.
+            This class should be a subclass of http.server.BaseHTTPRequestHandler and override its methods to handle requests.
+        port (int, optional): The port number on which the server should listen.
 
-    Returns:
-        None
     """
     server_address = ("", port)
-    httpd = server_class(server_address, handler_class)
 
-    # Use SSLContext instead of wrap_socket
+    # Initialize the custom server with the file_transfer_log
+    httpd = CustomHTTPServer(
+        server_address, handler_class, file_transfer_log=file_transfer_log
+    )
+
+    # Setup SSL context
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(
-        "../cert/fullchain.pem", "../cert/privkey.pem"
-    )  # Specify your cert and key files
+    context.load_cert_chain(certfile=CERTFILE, keyfile=KEYFILE)
 
+    # Apply SSL to the server's socket
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-    print(f"https://myworldspots.com:{port}/{token}/")
+    print(f"{URL}:{port}/{token}/")
     httpd.serve_forever()
 
 
+shutdown_in_progress = False
+
+
+def signal_handler(sig, frame):
+    global shutdown_in_progress
+    if not shutdown_in_progress:
+        shutdown_in_progress = True
+        print(f"Signal {sig} received, shutting down...")
+        # Here, initiate the shutdown process, such as notifying threads to complete
+        file_transfer_log.close_connection()
+        # If you have threads or other resources to clean up, do so here
+        sys.exit(0)
+
+
+# Register handlers for multiple signals
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
 if __name__ == "__main__":
-    ic()
-    run()
+    try:
+        ic()
+        run()
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+    finally:
+        if not shutdown_in_progress:
+            file_transfer_log.close_connection()  # Ensures the connection is closed on other types of exits
