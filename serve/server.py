@@ -15,16 +15,26 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def translate_path(self, path):
         parsed_path = urlparse(path)
         path_parts = parsed_path.path.strip("/").split("/", 1)
+
         if len(path_parts) >= 1 and path_parts[0] == token:
             if len(path_parts) == 2:
-                new_path = '/' + path_parts[1]
+                # Split the second part of the path to check for 'resources'
+                resource_parts = path_parts[1].split("/", 1)
+
+                if resource_parts[0] == 'resources':
+                    # Accessing the 'resources' directory
+                    new_path = '/' + (
+                        resource_parts[1] if len(resource_parts) > 1 else '')
+                    return os.path.join(os.getcwd(), 'resources', new_path.strip('/'))
+                else:
+                    # Accessing the 'public_html' directory
+                    new_path = '/' + path_parts[1]
+                    return os.path.join(os.getcwd(), 'public_html', new_path.strip('/'))
             else:
-                # Point to the root of the public_html directory if no specific file/directory is requested
-                new_path = '/'
-            # Map the new path to the public_html directory
-            return os.path.join(os.getcwd(), 'public_html', new_path.strip('/'))
+                # No specific file/directory requested; default to the root of 'public_html'
+                return os.path.join(os.getcwd(), 'public_html', '')
         else:
-            # Return empty string to signal unauthorized access
+            # Invalid or missing token; return an empty string to signal unauthorized access
             return ""
 
     def list_directory(self, path):
@@ -38,7 +48,7 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         f = io.BytesIO()  # Use BytesIO to handle binary data
 
         # URL or path to the background image
-        background_image_url = '/background.webp'  # Adjust this to the correct path or URL
+        background_image_url = f'/{token}/resources/background.webp'
 
         displaypath = html.escape(quote(self.path))
         f.write(f'<!DOCTYPE html>\n'.encode())
