@@ -8,7 +8,7 @@ from urllib.parse import urlparse, quote
 from icecream import ic
 
 # Generate a secure token
-token = token_urlsafe(16)  # Shorter token for readability; adjust length as needed
+token = token_urlsafe(48)  # Shorter token for readability; adjust length as needed
 
 
 class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -38,41 +38,66 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             return ""
 
     def list_directory(self, path):
-        """Generate and serve a simple directory listing."""
         try:
             list = os.listdir(path)
         except os.error:
             self.send_error(404, "No permission to list directory")
             return None
         list.sort(key=lambda a: a.lower())
-        f = io.BytesIO()  # Use BytesIO to handle binary data
+        f = io.BytesIO()
 
-        # URL or path to the background image
+        # Adjusted background image URL to include the token
         background_image_url = f'/{token}/resources/background.webp'
 
-        displaypath = html.escape(quote(self.path))
         f.write(f'<!DOCTYPE html>\n'.encode())
+        f.write(f'<html>\n<head>\n'.encode())
         f.write(
-            f'<html>\n<head>\n<title>Directory listing for {displaypath}</title>\n'.encode())
-        # Include CSS for the background image
-        f.write(
-            f'<style>body {{ background-image: url("{background_image_url}"); background-size: cover; }}</style>\n'.encode())
-        f.write(
-            f'</head>\n<body>\n<h2>Directory listing for {displaypath}</h2>\n'.encode())
-        f.write('<hr>\n<ul>\n'.encode())
+            f'<meta name="viewport" content="width=device-width, initial-scale=1">\n'.encode())
+        f.write(f'<title>Contents</title>\n'.encode())
+        # Updated CSS for cooler display
+        f.write(f'''<style>
+        body {{
+            background-image: url("{background_image_url}");
+            background-size: cover;
+            color: white; /* Change text color to white */
+            font-family: Arial, sans-serif; /* Use a more modern font */
+            padding: 20px;
+        }}
+        h2 {{
+            color: #f0f0f0; /* Lighter shade of white for heading */
+        }}
+        a {{
+            color: #add8e6; /* Light blue color for links for better contrast */
+            text-decoration: none; /* No underline */
+        }}
+        a:hover {{
+            text-decoration: underline; /* Underline on hover */
+        }}
+        ul {{
+            list-style-type: none; /* No bullets */
+            padding: 0;
+        }}
+        li {{
+            margin-bottom: 10px; /* Add space between items */
+        }}
+        </style>\n'''.encode())
+        f.write(f'</head>\n<body>\n'.encode())
+        # Removed the verbose title, using a simple heading instead
+        f.write(f'<h2>Contents</h2>\n'.encode())
+        f.write('<ul>\n'.encode())
 
         for name in list:
             fullname = os.path.join(path, name)
             displayname = linkname = name
-            # Append / for directories or @ for symbolic links
             if os.path.isdir(fullname):
                 displayname = name + "/"
                 linkname = name + "/"
             if os.path.islink(fullname):
                 displayname = name + "@"
-                # Note: a link to a directory displays with @ and links with /
+            # Ensure the link includes the token for secured access
             f.write(
-                f'<li><a href="{quote(linkname)}">{html.escape(displayname)}</a>\n'.encode())
+                f'<li><a href="/{token}/{quote(linkname)}">{html.escape(displayname)}</a>\n'.encode())
+
         f.write('</ul>\n<hr>\n</body>\n</html>\n'.encode())
         length = f.tell()
         f.seek(0)
