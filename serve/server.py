@@ -44,12 +44,14 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def list_directory(self, path):
         try:
-            list = os.listdir(path)
+            listing = os.listdir(path)
         except os.error:
             self.send_error(404, "No permission to list directory")
             return None
-        list.sort(key=lambda a: a.lower())
+        listing.sort(key=lambda a: a.lower())
         f = io.BytesIO()
+
+        display_path = html.escape(unquote(self.path))
 
         # Adjusted background image URL to include the token
         background_image_url = f'/{token}/resources/background.webp'
@@ -91,19 +93,20 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         f.write(f'<h2>Contents</h2>\n'.encode())
         f.write('<ul>\n'.encode())
 
-        for name in list:
+        for name in listing:
             fullname = os.path.join(path, name)
             displayname = linkname = name
             if os.path.isdir(fullname):
-                displayname = name + "/"
-                linkname = name + "/"
-            if os.path.islink(fullname):
-                displayname = name + "@"
-            # Ensure the link includes the token for secured access
-            f.write(
-                f'<li><a href="/{token}/{quote(linkname)}">{html.escape(displayname)}</a>\n'.encode())
+                displayname += "/"
+                linkname += "/"
 
-        f.write('</ul>\n<hr>\n</body>\n</html>\n'.encode())
+            # Here, the key change: prefix the token and the correctly encoded full path
+            encoded_linkname = quote(linkname)
+            # Use `display_path`, which already includes the token and the full path to the current directory.
+            full_url = f'{display_path}{encoded_linkname}'
+
+            f.write(
+                f'<li><a href="{full_url}">{html.escape(displayname)}</a>\n'.encode())
         length = f.tell()
         f.seek(0)
         self.send_response(200)
