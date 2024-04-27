@@ -9,8 +9,7 @@ This project implements a secure file server in Python, designed for private fil
 ## Basic usage
 
 - Put your files and folders under _server/serve/public_html_  
-- Share the unique URL given by the server
-https://myIP:8000/5_UjznnDUlqagVEkA4hUz_tjEmrNCeypUJ6wqQqW4mEv3TyWRypbPePZxM8Y4T2f/
+- Share the unique URL given by the server. Example URL: https://myIP:8000/5_UjznnDUlqagVEkA4hUz_tjEmrNCeypUJ6wqQqW4mEv3TyWRypbPePZxM8Y4T2f/
 
 ## Features
 
@@ -40,7 +39,7 @@ This project was developed using Python 3.12.2. We recommend using pyenv to avoi
 
 Before running the server, configure it by editing the `config.json` file. The following settings are available:
 
-- `url`: The URL the server will listen on (https://yourdomain.com or https://yourIP).
+- `url`: The URL the server will listen on (https://yourdomain.com or https://yourIP). You can get a free domain at https://dynv6.com/ if you don't own one.
 - `port`: The port number the server will use (set up your router port forwarding if required).
 - `certfile`: Path to the SSL certificate file for HTTPS.
 - `keyfile`: Path to the SSL key file for HTTPS.
