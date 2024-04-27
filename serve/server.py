@@ -325,15 +325,22 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         This method is called by end_headers of SimpleHTTPRequestHandler to finalize sending
         the headers, with modifications to handle content disposition for file downloads.
         """
-        # Extract the file extension from the requested path
-        _, ext = os.path.splitext(self.path)
-        # Check if the file extension is in our list of extensions to download
-        if ext in DOWNLOAD_EXTENSIONS:
-            # Set the Content-Disposition header to force a file download
-            filename = os.path.basename(self.path)
-            self.send_header(
-                "Content-Disposition", f'attachment; filename="{filename}"'
+        try:
+            # Extract the file extension from the requested path
+            _, ext = os.path.splitext(self.path)
+            # Check if the file extension is in our list of extensions to download
+            if ext in DOWNLOAD_EXTENSIONS:
+                # Set the Content-Disposition header to force a file download
+                filename = os.path.basename(self.path)
+                self.send_header(
+                    "Content-Disposition", f'attachment; filename="{filename}"'
+                )
+        except AttributeError:
+            # If self.path is not set or any other AttributeError occurs, handle it gracefully
+            print(
+                "Error handling headers: 'path' attribute is not set or other AttributeError."
             )
+
         # Continue with the standard header ending process
         super().end_headers()
 
