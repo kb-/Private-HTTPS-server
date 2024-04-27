@@ -2,6 +2,7 @@ import html
 import http
 import io
 import json
+import mimetypes
 import os
 import signal
 import ssl
@@ -196,17 +197,24 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         """
         self.range = None
+        # Translate the URL path to a filesystem path
         path = self.translate_path(self.path)
-        client_ip = self.client_address[0]  # Client's IP address
+
+        # Get the client's IP address for logging purposes
+        client_ip = self.client_address[0]
+
+        # Attempt to extract a range request header
         range_header = self.headers.get("Range")
 
         if range_header:
             try:
+                # Parse the range header into start and optional end bytes
                 self.range = range_header.split("=")[1].split("-")
                 self.range = (
                     int(self.range[0]),
                     int(self.range[1]) if self.range[1] else None,
                 )
+                # Log the start of a range transfer
                 self.file_transfer_log.log_transfer(
                     path=self.path,
                     status="range-start",
@@ -215,45 +223,41 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     client_ip=client_ip,
                 )
             except ValueError:
+                # If the range header is malformed, return an error
                 self.send_error(400, "Invalid range request")
                 return
 
         # ic(path)
-        if path == "":
+        # Check if the path resolved to a valid location
+        if not path:
+            # Path translation failed, likely due to an invalid or missing token
             self.send_error(404, "File not found")
             return
 
         # Check if the path is a directory
         if os.path.isdir(path):
+            # Look for an index.html to serve as the directory's default file
             if "index.html" in os.listdir(path):
                 path = os.path.join(path, "index.html")
-                self.send_header("Content-Type", "text/html")
             else:
                 # ic()
-                # This should automatically set the content type
+                # No index.html found, generate a directory listing instead
                 self.list_directory(path)
                 return
-        else:
-            # When serving files, especially HTML, ensure the content type is set if not automatically handled
-            if path.endswith(".html"):
-                self.send_header("Content-Type", "text/html")
 
-            # Log the start of a full file transfer here
+        try:
+            # Open the requested file
+            f = open(path, "rb")
+            fs = os.fstat(f.fileno())
+            _, ext = os.path.splitext(path)  # Extract file extension
+
             if not self.range:
                 self.file_transfer_log.log_transfer(
                     path=path, status="start", client_ip=client_ip
                 )
 
-            try:
-                f = open(path, "rb")
-            except OSError as e:
-                ic(e)
-                self.send_error(404, "File not found")
-                return
-
-        try:
-            fs = os.fstat(f.fileno())
             if self.range:
+                # Process range requests
                 start, end = self.range
                 if not end or end >= fs.st_size:
                     end = fs.st_size - 1
@@ -268,7 +272,7 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header("Accept-Ranges", "bytes")
                 self.end_headers()
                 self.wfile.write(f.read(length))
-                # Log the end of a range transfer here
+                # Log the completion of a range transfer
                 self.file_transfer_log.log_transfer(
                     path=path,
                     status="range-complete",
@@ -277,12 +281,24 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     client_ip=client_ip,
                 )
             else:
+                # For non-range requests, handle according to file extension
                 self.send_response(200)
+                # Determine MIME type using mimetypes module
+                mime_type, _ = mimetypes.guess_type(path)
+                if mime_type is None:
+                    mime_type = "application/octet-stream"  # Default to binary stream if unknown
+
+                if ext in DOWNLOAD_EXTENSIONS:
+                    filename = os.path.basename(path)
+                    self.send_header(
+                        "Content-Disposition", f'attachment; filename="{filename}"'
+                    )
+                self.send_header("Content-Type", mime_type)
+
                 self.send_header("Content-Length", str(fs.st_size))
                 self.send_header("Accept-Ranges", "bytes")
                 self.end_headers()
                 self.copyfile(f, self.wfile)  # type: ignore[misc]
-                # Log the end of a full file transfer here
                 self.file_transfer_log.log_transfer(
                     path=path, status="complete", client_ip=client_ip
                 )
@@ -290,11 +306,16 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             print(
                 f"SSL connection closed prematurely by the client at {datetime.now()}."
             )
-            # Log the premature closure here, if needed
+            # Log unexpected closure of SSL connection
             self.file_transfer_log.log_transfer(
                 path=path, status="failed", client_ip=client_ip
             )
+        except OSError:
+            # File opening or other OS-level errors
+            self.send_error(404, "File not found")
+            return
         finally:
+            # Ensure the file is closed after the transfer
             f.close()
 
     def send_error(
