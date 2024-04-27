@@ -1,6 +1,6 @@
 {
   "url": "",
-  "port": 8000,
+  "port": "",
   "certfile": "../cert/fullchain.pem",
   "keyfile": "../cert/privkey.pem",
   "download_extensions": [".mp4",".mov"]

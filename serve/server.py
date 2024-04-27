@@ -20,21 +20,28 @@ from icecream import ic
 from serve.logger import FileTransferLog
 
 # Load config
-with open("../config.json", "r") as f:
-    config = json.load(f)
+try:
+    with open("../config.json", "r") as f:
+        config = json.load(f)
+except FileNotFoundError:
+    print("Error: Configuration file not found.")
+except json.JSONDecodeError:
+    print("Error: Configuration file is not valid JSON.")
 
 # Initialize your FileTransferLog instance
 file_transfer_log = FileTransferLog("database.db")
 
 # Access config values
-URL = config["url"]
-PORT = config["port"]
+URL = config.get("url", False) or "https://localhost"
+PORT = config.get("port", False) or 443
 CERTFILE = config["certfile"]
 KEYFILE = config["keyfile"]
 DOWNLOAD_EXTENSIONS = config["download_extensions"]
 
 # Generate a secure token
 token = token_urlsafe(48)
+
+print(f"Server will start at {URL}:{PORT}.")
 
 
 class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -404,7 +411,11 @@ def run(
 
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-    print(f"{URL}:{port}/{token}/")
+    if port == 443:
+        print(f"{URL}/{token}/")
+    else:
+        print(f"{URL}:{port}/{token}/")
+
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
