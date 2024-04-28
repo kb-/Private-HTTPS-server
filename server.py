@@ -15,13 +15,11 @@ from types import FrameType
 from typing import Any, Optional, Type, Union
 from urllib.parse import quote, unquote, urlparse
 
-from icecream import ic
-
-from serve.logger import FileTransferLog
+from logger import FileTransferLog
 
 # Load config
 try:
-    with open("../config.json", "r") as f:
+    with open("config.json", "r") as f:
         config = json.load(f)
 except FileNotFoundError:
     print("Error: Configuration file not found.")
@@ -458,7 +456,6 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 if __name__ == "__main__":
     try:
-        ic()
         run()
     except Exception as e:
         print(f"Unexpected error: {e}")

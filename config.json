@@ -1,7 +1,7 @@
 {
   "url": "",
   "port": "",
-  "certfile": "../cert/fullchain.pem",
-  "keyfile": "../cert/privkey.pem",
+  "certfile": "./cert/fullchain.pem",
+  "keyfile": "./cert/privkey.pem",
   "download_extensions": [".mp4",".mov"]
 }

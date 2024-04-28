@@ -3,4 +3,4 @@ config.json
 env/
 public_html/
 .idea/
-serve/database.db
+database.db
