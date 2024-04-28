@@ -3,4 +3,8 @@ ruff
 black
 isort
 pre-commit
+pytest
+pytest-mock
+pytest-cov
 pyinstaller
+requests

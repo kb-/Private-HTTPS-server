@@ -18,13 +18,14 @@ from urllib.parse import quote, unquote, urlparse
 from logger import FileTransferLog
 
 # Load config
+# Load config
 try:
     with open("config.json", "r") as f:
         config = json.load(f)
 except FileNotFoundError:
-    print("Error: Configuration file not found.")
+    sys.exit("Error: Configuration file not found.")
 except json.JSONDecodeError:
-    print("Error: Configuration file is not valid JSON.")
+    sys.exit("Error: Configuration file is not valid JSON.")
 
 # Initialize your FileTransferLog instance
 file_transfer_log = FileTransferLog("database.db")
@@ -43,18 +44,20 @@ print(f"Server will start at {URL}:{PORT}.")
 
 
 class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    """Custom HTTP request handler with token-based path translation and listing directory contents."""
+    """Custom HTTP request handler with token-based path translation and listing
+    directory contents."""
 
     def __init__(self, *args, file_transfer_log: FileTransferLog, **kwargs):
         """
         Initialize the request handler instance with a reference to a FileTransferLog.
 
-        Args:
-            *args: Variable length argument list passed to the superclass initializer.
-            file_transfer_log (Optional[FileTransferLog]): An instance of FileTransferLog to log file transfers.
-            **kwargs: Arbitrary keyword arguments passed to the superclass initializer.
+        Args: *args: Variable length argument list passed to the superclass
+        initializer. file_transfer_log (Optional[FileTransferLog]): An instance of
+        FileTransferLog to log file transfers. **kwargs: Arbitrary keyword arguments
+        passed to the superclass initializer.
         """
         self.file_transfer_log = file_transfer_log
+        self.root = False  # Initialize root variable
         super().__init__(*args, **kwargs)
 
     def translate_path(self, path: str) -> str:
@@ -95,13 +98,15 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         os.getcwd(), "public_html", decoded_path.strip("/")
                     )
             else:
-                # No specific file/directory requested; default to the root of 'public_html'
+                # No specific file/directory requested; default to the root of
+                # 'public_html'
                 return os.path.join(os.getcwd(), "public_html", "")
         else:
-            # Invalid or missing token; return an empty string to signal unauthorized access
+            # Invalid or missing token; return an empty string to signal unauthorized
+            # access
             return ""
 
-    def list_directory(self, path: Union[str, os.PathLike]) -> None:
+    def list_directory(self, path: Union[str, os.PathLike]) -> Optional[str]:
         """
         Generate and send a directory listing in HTML format to the client.
 
@@ -174,36 +179,44 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
             # Here, the key change: prefix the token and the correctly encoded full path
             encoded_linkname = quote(linkname)
-            # Use `display_path`, which already includes the token and the full path to the current directory.
+            # Use `display_path`, which already includes the token and the full path
+            # to the current directory.
             full_url = f"{display_path}{encoded_linkname}"
 
             f.write(
                 f'<li><a href="{full_url}">{html.escape(displayname)}</a>\n'.encode()
             )
+        f.write("</ul>\n".encode())
+        f.write("</body>\n</html>\n".encode())
         length = f.tell()
         f.seek(0)
         self.send_response(200)
         self.send_header("Content-type", "text/html")
         self.send_header("Content-Length", str(length))
         self.end_headers()
+        content = ""
         if f:
             try:
                 self.copyfile(f, self.wfile)  # type: ignore[misc]
             finally:
+                content = f.getvalue().decode()  # Convert BytesIO content to a string
                 f.close()
-        return None
+        return content
 
     def do_GET(self) -> None:
         """
         Handle a GET request.
 
-        This method is called to handle each GET request received by the server. It handles
-        serving files, directory listings, and implements range requests if specified.
-
+        This method is called to handle each GET request received by the server. It
+        handles serving files, directory listings, and implements range requests if
+        specified.
         """
         self.range = None
         # Translate the URL path to a filesystem path
         path = self.translate_path(self.path)
+
+        if self.path == "/":
+            self.root = True
 
         # Get the client's IP address for logging purposes
         client_ip = self.client_address[0]
@@ -215,6 +228,8 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 # Parse the range header into start and optional end bytes
                 self.range = range_header.split("=")[1].split("-")
+                if self.range[0] > self.range[1]:
+                    self.send_error(416, "Incoherent Range values")
                 self.range = (
                     int(self.range[0]),
                     int(self.range[1]) if self.range[1] else None,
@@ -227,14 +242,14 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     end_byte=self.range[1] if self.range[1] else None,
                     client_ip=client_ip,
                 )
-            except ValueError:
+            except (IndexError, ValueError):
                 # If the range header is malformed, return an error
                 self.send_error(400, "Invalid range request")
                 return
 
         # ic(path)
         # Check if the path resolved to a valid location
-        if not path:
+        if not path or not os.path.exists(path):
             # Path translation failed, likely due to an invalid or missing token
             self.send_error(404, "File not found")
             return
@@ -291,7 +306,8 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 # Determine MIME type using mimetypes module
                 mime_type, _ = mimetypes.guess_type(path)
                 if mime_type is None:
-                    mime_type = "application/octet-stream"  # Default to binary stream if unknown
+                    # Default to binary stream if unknown
+                    mime_type = "application/octet-stream"
 
                 if ext in DOWNLOAD_EXTENSIONS:
                     filename = os.path.basename(path)
@@ -329,15 +345,14 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         """
         Send an HTTP error response to the client.
 
-        This method overrides the SimpleHTTPRequestHandler's send_error method to customize
-        error handling, such as redirecting on 404 errors.
+        This method overrides the SimpleHTTPRequestHandler's send_error method to
+        customize error handling, such as redirecting on 404 errors.
 
-        Args:
-            code (int): The HTTP status code to send.
-            message (Optional[str]): An optional human-readable message describing the error.
-            explain (Optional[str]): An optional detailed explanation of the error.
+        Args: code (int): The HTTP status code to send. message (Optional[str]): An
+        optional human-readable message describing the error. explain (Optional[
+        str]): An optional detailed explanation of the error.
         """
-        if code == 404:
+        if code == 404 and not self.root:  # Check if not already at URL
             self.send_response(302)  # 302 Found - Temporary redirect
             self.send_header("Location", URL)
             self.end_headers()
@@ -388,10 +403,13 @@ def run(
     utilizes SSLContext to secure the server.
 
     Args:
-        handler_class: The request handler class that defines how to handle incoming HTTP requests.
-                       This class should be a subclass of http.server.BaseHTTPRequestHandler
-                       and override its methods to handle requests.
-        port (int, optional): The port number on which the server should listen. Defaults to PORT.
+        handler_class: The request handler class that defines how to handle incoming
+                       HTTP requests.
+                       This class should be a subclass of http.server.
+                       BaseHTTPRequestHandler and override its methods to handle
+                       requests.
+        port (int, optional): The port number on which the server should listen.
+                       Defaults to PORT.
     """
     server_address = ("", port)
 
@@ -410,8 +428,10 @@ def run(
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
     if port == 443:
+        handler_class.url = f"{URL}/{token}/"
         print(f"{URL}/{token}/")
     else:
+        handler_class.url = f"{URL}:{port}/{token}/"
         print(f"{URL}:{port}/{token}/")
 
     try:
@@ -461,4 +481,5 @@ if __name__ == "__main__":
         print(f"Unexpected error: {e}")
     finally:
         if not shutdown_in_progress:
-            file_transfer_log.close_connection()  # Ensures the connection is closed on other types of exits
+            # Ensures the connection is closed on other types of exits
+            file_transfer_log.close_connection()

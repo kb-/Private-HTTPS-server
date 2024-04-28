@@ -1,1 +1,2 @@
 If you don't own a domain, you may get a free domain at https://dynv6.com/
+https://letsencrypt.org/ offers free SSL certificates
