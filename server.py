@@ -228,18 +228,19 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 # Parse the range header into start and optional end bytes
                 self.range = range_header.split("=")[1].split("-")
-                if self.range[0] > self.range[1]:
+                start = int(self.range[0])
+                end = int(self.range[1]) if self.range[1] else None
+                if end is not None and start > end:
                     self.send_error(416, "Incoherent Range values")
-                self.range = (
-                    int(self.range[0]),
-                    int(self.range[1]) if self.range[1] else None,
-                )
+                    return
+
+                self.range = (start, end)
                 # Log the start of a range transfer
                 self.file_transfer_log.log_transfer(
                     path=self.path,
                     status="range-start",
-                    start_byte=self.range[0],
-                    end_byte=self.range[1] if self.range[1] else None,
+                    start_byte=start,
+                    end_byte=end if end else None,
                     client_ip=client_ip,
                 )
             except (IndexError, ValueError):
