@@ -47,6 +47,8 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Custom HTTP request handler with token-based path translation and listing
     directory contents."""
 
+    url = ""
+
     def __init__(self, *args, file_transfer_log: FileTransferLog, **kwargs):
         """
         Initialize the request handler instance with a reference to a FileTransferLog.
@@ -257,14 +259,16 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                 # Now validate and adjust the range with file size info
                 if start is not None or end is not None:
-                    if start is None:
+                    if start is None and end is not None:
                         # 'bytes=-500' end only
                         start = max(0, fs_size - end)
                         end = fs_size - 1
                     elif end is None:
                         # 'bytes=500-' start only
                         end = fs_size - 1
-                    if end >= fs_size or start > end:
+                    if (end is not None and end >= fs_size) or (
+                        start is not None and end is not None and start > end
+                    ):
                         self.send_error(416, "Requested Range Not Satisfiable")
                         return
 
@@ -278,21 +282,24 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     )
 
                     # Valid range: process it
-                    f.seek(start)
-                    self.send_response(206)
-                    self.send_header("Content-Range", f"bytes {start}-{end}/{fs_size}")
-                    self.send_header("Content-Length", str(end - start + 1))
-                    self.send_header("Accept-Ranges", "bytes")
-                    self.end_headers()
-                    self.wfile.write(f.read(end - start + 1))
+                    if isinstance(start, int) and isinstance(end, int):
+                        f.seek(start)
+                        self.send_response(206)
+                        self.send_header(
+                            "Content-Range", f"bytes {start}-{end}/{fs_size}"
+                        )
+                        self.send_header("Content-Length", str(end - start + 1))
+                        self.send_header("Accept-Ranges", "bytes")
+                        self.end_headers()
+                        self.wfile.write(f.read(end - start + 1))
 
-                    self.file_transfer_log.log_transfer(
-                        path=path,
-                        status="range-complete",
-                        start_byte=start,
-                        end_byte=end,
-                        client_ip=client_ip,
-                    )
+                        self.file_transfer_log.log_transfer(
+                            path=path,
+                            status="range-complete",
+                            start_byte=start,
+                            end_byte=end,
+                            client_ip=client_ip,
+                        )
                     return
 
                 self.file_transfer_log.log_transfer(

@@ -42,19 +42,19 @@ repos:
 #        language: system
 #        pass_filenames: false
 
-#      - id: ruff-format
-#        name: ruff-format
-#        description: "Run 'ruff format' for extremely fast Python formatting"
-#        entry: ruff format --force-exclude
-#        language: python
-#        types_or: [ python, pyi ]
-#        args: [ ]
-#        require_serial: true
-#        additional_dependencies: [ ]
-#        minimum_pre_commit_version: "2.9.2"
+      - id: ruff-format
+        name: ruff-format
+        description: "Run 'ruff format' for extremely fast Python formatting"
+        entry: ruff format --force-exclude
+        language: python
+        types_or: [ python, pyi ]
+        args: [ ]
+        require_serial: true
+        additional_dependencies: [ ]
+        minimum_pre_commit_version: "2.9.2"
 
-#      - id: mypy
-#        name: mypy
-#        entry: ./env/Scripts/mypy.exe
-#        language: system
-#        types: [ python ]
+      - id: mypy
+        name: mypy
+        entry: ./env/Scripts/mypy.exe
+        language: system
+        types: [ python ]
