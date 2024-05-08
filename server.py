@@ -106,7 +106,7 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             # access
             return ""
 
-    def list_directory(self, path: Union[str, os.PathLike]) -> Optional[str]:
+    def list_directory(self, path: Union[str, os.PathLike]) -> Optional[io.BytesIO]:
         """
         Generate and send a directory listing in HTML format to the client.
 
@@ -194,14 +194,14 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-type", "text/html")
         self.send_header("Content-Length", str(length))
         self.end_headers()
-        content = ""
+        # content = ""
         if f:
             try:
                 self.copyfile(f, self.wfile)  # type: ignore[misc]
             finally:
-                content = f.getvalue().decode()  # Convert BytesIO content to a string
+                # content = f.getvalue().decode()  # Convert BytesIO content to a string
                 f.close()
-        return content
+        return None
 
     def do_GET(self) -> None:
         """
@@ -211,49 +211,33 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         handles serving files, directory listings, and implements range requests if
         specified.
         """
-        self.range = None
         # Translate the URL path to a filesystem path
         path = self.translate_path(self.path)
 
-        if self.path == "/":
-            self.root = True
+        # if self.path == "/":
+        #     self.root = True
+
+        # Check if the path resolved to a valid location
+        if not path:  # or not os.path.exists(path):
+            self.send_error(404, "File not found")
+            return
 
         # Get the client's IP address for logging purposes
         client_ip = self.client_address[0]
 
-        # Attempt to extract a range request header
+        # Early parsing of the range header, no validation yet
         range_header = self.headers.get("Range")
-
         if range_header:
             try:
-                # Parse the range header into start and optional end bytes
-                self.range = range_header.split("=")[1].split("-")
-                start = int(self.range[0])
-                end = int(self.range[1]) if self.range[1] else None
-                if end is not None and start > end:
-                    self.send_error(416, "Incoherent Range values")
-                    return
-
-                self.range = (start, end)
-                # Log the start of a range transfer
-                self.file_transfer_log.log_transfer(
-                    path=self.path,
-                    status="range-start",
-                    start_byte=start,
-                    end_byte=end if end else None,
-                    client_ip=client_ip,
-                )
-            except (IndexError, ValueError):
-                # If the range header is malformed, return an error
+                unit, range_spec = range_header.split("=")
+                parts = range_spec.split("-")
+                start = int(parts[0]) if parts[0] else None
+                end = int(parts[1]) if len(parts) > 1 and parts[1] else None
+            except (ValueError, IndexError):
                 self.send_error(400, "Invalid range request")
                 return
-
-        # ic(path)
-        # Check if the path resolved to a valid location
-        if not path or not os.path.exists(path):
-            # Path translation failed, likely due to an invalid or missing token
-            self.send_error(404, "File not found")
-            return
+        else:
+            start = end = None
 
         # Check if the path is a directory
         if os.path.isdir(path):
@@ -267,41 +251,54 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 return
 
         try:
-            # Open the requested file
-            f = open(path, "rb")
-            fs = os.fstat(f.fileno())
-            _, ext = os.path.splitext(path)  # Extract file extension
+            with open(path, "rb") as f:
+                fs = os.fstat(f.fileno())
+                fs_size = fs.st_size
 
-            if not self.range:
+                # Now validate and adjust the range with file size info
+                if start is not None or end is not None:
+                    if start is None:
+                        # 'bytes=-500' end only
+                        start = max(0, fs_size - end)
+                        end = fs_size - 1
+                    elif end is None:
+                        # 'bytes=500-' start only
+                        end = fs_size - 1
+                    if end >= fs_size or start > end:
+                        self.send_error(416, "Requested Range Not Satisfiable")
+                        return
+
+                    # Log the start of a range transfer
+                    self.file_transfer_log.log_transfer(
+                        path=self.path,
+                        status="range-start",
+                        start_byte=start,
+                        end_byte=end if end else None,
+                        client_ip=client_ip,
+                    )
+
+                    # Valid range: process it
+                    f.seek(start)
+                    self.send_response(206)
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{fs_size}")
+                    self.send_header("Content-Length", str(end - start + 1))
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.end_headers()
+                    self.wfile.write(f.read(end - start + 1))
+
+                    self.file_transfer_log.log_transfer(
+                        path=path,
+                        status="range-complete",
+                        start_byte=start,
+                        end_byte=end,
+                        client_ip=client_ip,
+                    )
+                    return
+
                 self.file_transfer_log.log_transfer(
                     path=path, status="start", client_ip=client_ip
                 )
 
-            if self.range:
-                # Process range requests
-                start, end = self.range
-                if not end or end >= fs.st_size:
-                    end = fs.st_size - 1
-                if start > fs.st_size or start > end:
-                    self.send_error(416, "Requested Range Not Satisfiable")
-                    return
-                length = end - start + 1
-                f.seek(start)
-                self.send_response(206)
-                self.send_header("Content-Range", f"bytes {start}-{end}/{fs.st_size}")
-                self.send_header("Content-Length", str(length))
-                self.send_header("Accept-Ranges", "bytes")
-                self.end_headers()
-                self.wfile.write(f.read(length))
-                # Log the completion of a range transfer
-                self.file_transfer_log.log_transfer(
-                    path=path,
-                    status="range-complete",
-                    start_byte=start,
-                    end_byte=end,
-                    client_ip=client_ip,
-                )
-            else:
                 # For non-range requests, handle according to file extension
                 self.send_response(200)
                 # Determine MIME type using mimetypes module
@@ -309,6 +306,8 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 if mime_type is None:
                     # Default to binary stream if unknown
                     mime_type = "application/octet-stream"
+
+                _, ext = os.path.splitext(path)  # Extract file extension
 
                 if ext in DOWNLOAD_EXTENSIONS:
                     filename = os.path.basename(path)
@@ -324,6 +323,7 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.file_transfer_log.log_transfer(
                     path=path, status="complete", client_ip=client_ip
                 )
+                f.close()
         except ssl.SSLEOFError:
             print(
                 f"SSL connection closed prematurely by the client at {datetime.now()}."
@@ -332,13 +332,11 @@ class TokenRangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.file_transfer_log.log_transfer(
                 path=path, status="failed", client_ip=client_ip
             )
+            f.close()
         except OSError:
             # File opening or other OS-level errors
             self.send_error(404, "File not found")
             return
-        finally:
-            # Ensure the file is closed after the transfer
-            f.close()
 
     def send_error(
         self, code: int, message: Optional[str] = None, explain: Optional[str] = None

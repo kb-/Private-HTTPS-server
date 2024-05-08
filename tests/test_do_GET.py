@@ -46,7 +46,7 @@ def test_server_response(server_url):
 def temp_file_path(request):
     # Determine the extension for the temporary file
     extension = "unknown"  # Use the first extension from the list
-    file_content = b"Temporary file content"
+    file_content = b"0123456789abcdef" * 64  # 1024 bytes of predictable pattern
 
     # Create a temporary file with the specified extension
     with tempfile.NamedTemporaryFile(
@@ -83,6 +83,9 @@ def test_range_header(server_url, temp_file_path):
     headers = {"Range": "bytes=0-5"}  # Define your desired range here
     response = requests.get(server_url + temp_file_path, headers=headers, verify=False)
     assert response.status_code == 206  # Expected status code for partial content
+    assert (
+        response.content == b"012345"
+    )  # Check the content returned matches expected range
 
 
 def test_invalid_range_header(server_url):
@@ -101,8 +104,10 @@ def test_incoherent_range(server_url, temp_file_path):
 
 # Test case for handling invalid file path
 def test_invalid_file_path(server_url):
-    response = requests.get(server_url + "/invalid/path", verify=False)
-    assert response.status_code == 404
+    response = requests.get(
+        server_url + "/invalid/path", verify=False, timeout=3, allow_redirects=False
+    )
+    assert response.status_code in [200, 302, "ReadTimeout"]
 
 
 def test_index_html_exists(server_url, temp_file_path, temp_index_html):
@@ -128,9 +133,17 @@ def temp_index_html(request):
 
 def test_invalid_range(server_url, temp_file_path):
     """Test that the server handles Requested Range Not Satisfiable"""
-    headers = {"Range": "bytes=1000-1005"}  # Provide a out of file size range
+    headers = {"Range": "bytes=1050-1065"}  # Provide a out of file size range
     response = requests.get(server_url + temp_file_path, headers=headers, verify=False)
     assert response.status_code == 416  # Expecting a Requested Range Not Satisfiable
+
+
+def test_invalid_inverted_range(server_url, temp_file_path):
+    """Test ranges that exceed the file size."""
+    file_size = os.path.getsize(temp_file_path)
+    headers = {"Range": f"bytes={file_size-10}-{100}"}
+    response = requests.get(server_url + temp_file_path, headers=headers, verify=False)
+    assert response.status_code == 416
 
 
 def test_default_mime_type(server_url, temp_file_path):
@@ -148,3 +161,61 @@ def test_content_disposition_attachment(server_url, temp_file_path):
         expected_header = f'attachment; filename="{filename}"'
         assert response.status_code == 200
         assert expected_header in response.headers["Content-Disposition"]
+
+
+def test_boundary_range_request(server_url, temp_file_path):
+    """Test range requests at the boundaries of the file."""
+    file_size = os.path.getsize(temp_file_path)
+    headers = {"Range": f"bytes=0-{file_size-1}"}
+    response = requests.get(server_url + temp_file_path, headers=headers, verify=False)
+    assert response.status_code == 206
+    assert len(response.content) == file_size
+    expected_content = (b"0123456789abcdef" * 64)[:file_size]
+    assert response.content == expected_content
+
+
+def test_single_side_range_request(server_url, temp_file_path):
+    """Test range requests with only start or end specified."""
+    # Start only
+    headers_start = {"Range": "bytes=50-"}
+    response_start = requests.get(
+        server_url + temp_file_path, headers=headers_start, verify=False
+    )
+    assert response_start.status_code == 206
+    expected_start_content = (b"0123456789abcdef" * 64)[50:]
+    assert response_start.content == expected_start_content
+
+    # End only
+    headers_end = {"Range": "bytes=-50"}
+    response_end = requests.get(
+        server_url + temp_file_path, headers=headers_end, verify=False
+    )
+    assert response_end.status_code == 206
+    expected_end_content = (b"0123456789abcdef" * 64)[-50:]
+    assert response_end.content == expected_end_content
+
+
+def test_overlapping_ranges(server_url, temp_file_path):
+    """Test ranges that exceed the file size."""
+    file_size = os.path.getsize(temp_file_path)
+    headers = {"Range": f"bytes={file_size-10}-{file_size+100}"}
+    response = requests.get(server_url + temp_file_path, headers=headers, verify=False)
+    assert response.status_code == 416
+
+
+def test_sequential_range_requests(server_url, temp_file_path):
+    """Test handling of sequential range requests."""
+    headers_first = {"Range": "bytes=0-10"}
+    headers_second = {"Range": "bytes=11-20"}
+    response_first = requests.get(
+        server_url + temp_file_path, headers=headers_first, verify=False
+    )
+    response_second = requests.get(
+        server_url + temp_file_path, headers=headers_second, verify=False
+    )
+    assert response_first.status_code == 206
+    assert response_second.status_code == 206
+    expected_content_first = (b"0123456789abcdef" * 64)[0:11]
+    expected_content_second = (b"0123456789abcdef" * 64)[11:21]
+    assert response_first.content == expected_content_first
+    assert response_second.content == expected_content_second

@@ -2,6 +2,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+from isort import io
 
 from server import TokenRangeHTTPRequestHandler, file_transfer_log, token
 
@@ -132,10 +133,16 @@ def test_translate_path_no_resource_directory(handler):
 
 
 def test_directory_listing(handler, mock_os_listdir):
-    # Assume handler's list_directory now returns the HTML as a string
-    response = handler.list_directory(handler.path)
+    # Substitute wfile with a BytesIO object to capture the output
+    handler.wfile = io.BytesIO()
 
-    # Check if the response string contains expected content
+    # Execute the method which writes the directory listing to wfile
+    handler.list_directory(handler.path)
+
+    # Retrieve the output from wfile
+    response = handler.wfile.getvalue().decode()
+
+    # Assertions to check if the expected files are listed in the HTML response
     assert "file1.txt" in response, "Directory listing should include 'file1.txt'"
     assert "file2.jpg" in response, "Directory listing should include 'file2.jpg'"
 
@@ -147,8 +154,9 @@ def mock_empty_listdir():
 
 
 def test_directory_listing_empty(handler, mock_empty_listdir):
-    response = handler.list_directory(handler.path)
-    # Check if the output contains an empty list or a specific message indicating no files
+    handler.wfile = io.BytesIO()
+    handler.list_directory(handler.path)
+    response = handler.wfile.getvalue().decode()
     assert (
         "<ul>\n</ul>" in response or "No files found" in response
     ), "Empty directory should be handled gracefully"
@@ -167,8 +175,16 @@ def test_directory_listing_access_error(handler, mock_listdir_failure):
 
 
 def test_directory_listing_format(handler, mock_os_listdir):
-    response = handler.list_directory(handler.path)
-    # Check for key HTML elements rather than the exact full HTML structure
+    # Patch the wfile where the HTTP response is written
+    handler.wfile = io.BytesIO()
+
+    # Run the method that doesn't return the output but writes directly to wfile
+    handler.list_directory(handler.path)
+
+    # Get the output from wfile
+    response = handler.wfile.getvalue().decode()
+
+    # Assertions based on the output written to wfile
     assert (
         "<html>" in response and "</html>" in response
     ), "Response should be formatted in HTML"
@@ -179,7 +195,16 @@ def test_directory_listing_format(handler, mock_os_listdir):
 
 
 def test_directory_listing_includes_files(handler, mock_os_listdir):
-    response = handler.list_directory(handler.path)
+    # Mock the wfile to capture output
+    handler.wfile = io.BytesIO()
+
+    # Execute the list_directory method, which writes to wfile
+    handler.list_directory(handler.path)
+
+    # Retrieve the output from wfile and decode it to a string for assertion
+    response = handler.wfile.getvalue().decode()
+
+    # Assertions to check if the expected files are listed in the HTML response
     assert "file1.txt" in response, "Directory listing should include 'file1.txt'"
     assert "file2.jpg" in response, "Directory listing should include 'file2.jpg'"
 
@@ -204,10 +229,16 @@ def mock_os_path_isdir():
 def test_directory_listing_includes_directory(
     handler, mock_os_listdir_with_directory, mock_os_path_isdir
 ):
-    # Run the list_directory method
-    response = handler.list_directory(handler.path)
+    # Mock the wfile to capture output
+    handler.wfile = io.BytesIO()
 
-    # Now we're expecting 'directory/' in the response because we've mocked 'directory' as a directory
+    # Execute the list_directory method, which writes to wfile
+    handler.list_directory(handler.path)
+
+    # Retrieve the output from wfile and decode it to a string for assertion
+    response = handler.wfile.getvalue().decode()
+
+    # Assertions to check if directories are properly indicated in the HTML response
     assert (
         "directory/" in response
     ), "Directory listing should indicate 'directory' as a directory"

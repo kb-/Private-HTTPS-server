@@ -36,6 +36,12 @@ repos:
         additional_dependencies: [ ]
         minimum_pre_commit_version: "2.9.2"
 
+#      - id: pytest
+#        name: pytest
+#        entry: pytest tests --cov=server --cov-report=html -v
+#        language: system
+#        pass_filenames: false
+
 #      - id: ruff-format
 #        name: ruff-format
 #        description: "Run 'ruff format' for extremely fast Python formatting"
