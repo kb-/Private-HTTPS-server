@@ -9,7 +9,7 @@ import pytest
 import requests
 from icecream import ic
 
-from server import TokenRangeHTTPRequestHandler, run
+from lib.server import TokenRangeHTTPRequestHandler, run
 
 
 def is_server_ready(host, port):
@@ -155,7 +155,7 @@ def test_default_mime_type(server_url, temp_file_path):
 
 def test_content_disposition_attachment(server_url, temp_file_path):
     """Test that the server includes Content-Disposition header for files with allowed extensions."""
-    with patch("server.DOWNLOAD_EXTENSIONS", [".unknown"]):
+    with patch("lib.server.DOWNLOAD_EXTENSIONS", [".unknown"]):
         response = requests.get(server_url + temp_file_path, verify=False)
         filename = os.path.basename(temp_file_path)
         expected_header = f'attachment; filename="{filename}"'

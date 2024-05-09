@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from isort import io
 
-from server import TokenRangeHTTPRequestHandler, file_transfer_log, token
+from lib.server import TokenRangeHTTPRequestHandler, file_transfer_log, token
 
 
 def test_init(handler):

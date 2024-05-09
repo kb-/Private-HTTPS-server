@@ -15,12 +15,15 @@ from types import FrameType
 from typing import Any, Optional, Type, Union
 from urllib.parse import quote, unquote, urlparse
 
-from logger import FileTransferLog
+from lib.logger import FileTransferLog
 
-# Load config
-# Load config
+# from icecream import ic
+
+
+config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
+# ic(config_path)
 try:
-    with open("config.json", "r") as f:
+    with open(config_path, "r") as f:
         config = json.load(f)
 except FileNotFoundError:
     sys.exit("Error: Configuration file not found.")
@@ -28,7 +31,7 @@ except json.JSONDecodeError:
     sys.exit("Error: Configuration file is not valid JSON.")
 
 # Initialize your FileTransferLog instance
-file_transfer_log = FileTransferLog("database.db")
+file_transfer_log = FileTransferLog("../database.db")
 
 # Access config values
 URL = config.get("url", False) or "https://localhost"

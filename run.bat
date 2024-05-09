@@ -1,3 +1,3 @@
 REM @echo off
 call env\Scripts\activate
-python server.py
+python main.py
